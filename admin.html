@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Leaderboard (admin)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{
+  --page:#ffffff; --ink:#202124; --muted:#5f6368; --line:#dadce0; --sel:#f3e8fd; --accent:#a020f0;
+  color-scheme:light; box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --page:#202124; --ink:#e8eaed; --muted:#9aa0a6; --line:#3c4043; --sel:#3a2a4a; --accent:#c77dff; color-scheme:dark; }
+}
+:root[data-theme="dark"]{ --page:#202124; --ink:#e8eaed; --muted:#9aa0a6; --line:#3c4043; --sel:#3a2a4a; --accent:#c77dff; color-scheme:dark; }
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.px{font-family:"Press Start 2P",ui-monospace,monospace;font-weight:400}
+main{max-width:760px;margin:0 auto;padding:40px 20px 48px}
+h1{font-size:18px;line-height:1.5;margin:0 0 8px}
+.meta{color:var(--muted);font-size:13px;margin:0 0 20px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px}
+button{font:inherit;font-size:9px;cursor:pointer;color:var(--ink);background:transparent;border:2px solid var(--line);padding:9px 12px}
+button:focus-visible,input:focus-visible{outline:3px solid #1a73e8;outline-offset:2px}
+input{font:inherit;font-size:15px;color:var(--ink);background:transparent;border:2px solid var(--line);padding:6px 10px;border-radius:0;flex:1;min-width:160px}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;border-top:2px solid var(--line)}
+th{text-align:left;font-size:8px;color:var(--muted);padding:10px 8px;border-bottom:2px solid var(--line);white-space:nowrap}
+td{padding:9px 8px;border-bottom:2px solid var(--line);white-space:nowrap}
+td.rank,td.score{font-size:10px}
+td.score,th.score{text-align:right}
+td.when{color:var(--muted);font-size:13px}
+td.name{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+tr.top td{background:var(--sel)}
+tr.top td.rank{color:var(--accent)}
+.status{color:var(--muted);font-size:13px;margin:14px 0 0}
+</style>
+</head>
+<body>
+<main>
+  <h1 class="px">Leaderboard</h1>
+  <p class="meta" id="meta">Loading…</p>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Filter by name" aria-label="Filter by name">
+    <button class="px" id="refresh" type="button">Refresh</button>
+  </div>
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th class="px">Rank</th><th class="px">Name</th><th class="px">Delegate</th>
+        <th class="px">Set at</th><th class="px score">Score</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="status" id="status" aria-live="polite"></p>
+</main>
+<script>
+(() => {
+  const SUPABASE_URL = "https://wlspsexpaefwhgwzkbnq.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_YKf0gQbvS5KSk_E_GSK92w_f9OVe0hp";
+  const NAMES = { dino:"Delegasaurus", pc:"Delegate.exe", chair:"The Chair" };
+
+  const rowsEl = document.getElementById("rows");
+  const statusEl = document.getElementById("status");
+  const metaEl = document.getElementById("meta");
+  const q = document.getElementById("q");
+  let data = [], totalRuns = null;
+
+  const headers = { apikey: SUPABASE_KEY };
+  if (SUPABASE_KEY.startsWith("eyJ")) headers.Authorization = "Bearer " + SUPABASE_KEY;
+  const fmt = new Intl.DateTimeFormat(undefined, { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
+
+  function render(){
+    const f = q.value.trim().toLowerCase();
+    rowsEl.replaceChildren();
+    let shown = 0;
+    data.forEach((r, i) => {
+      if (f && !r.name.toLowerCase().includes(f)) return;
+      shown++;
+      const tr = document.createElement("tr");
+      if (r.rank === 1) tr.className = "top";
+      const cells = [
+        ["rank px", "#" + r.rank],
+        ["name", r.name],
+        ["", NAMES[r.character] || r.character],
+        ["when", r.created_at ? fmt.format(new Date(r.created_at)) : ""],
+        ["score px", String(r.score).padStart(5, "0")]
+      ];
+      for (const [cls, text] of cells){
+        const td = document.createElement("td");
+        if (cls) td.className = cls;
+        td.textContent = text;
+        tr.appendChild(td);
+      }
+      rowsEl.appendChild(tr);
+    });
+    if (!data.length) statusEl.textContent = "No scores yet.";
+    else if (!shown) statusEl.textContent = "No names match that filter.";
+    else statusEl.textContent = "";
+  }
+
+  async function load(){
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/leaderboard?select=name,score,character,created_at&order=score.desc,created_at.asc&limit=1000`, { headers });
+      if (!r.ok) throw new Error(r.status);
+      const rows = await r.json();
+      let rank = 0, prev = null;
+      data = rows.map((row, i) => { if (row.score !== prev){ rank = i + 1; prev = row.score; } return { ...row, rank }; });
+      try {
+        const c = await fetch(`${SUPABASE_URL}/rest/v1/scores?select=id`, { method:"HEAD", headers: { ...headers, Prefer:"count=exact" } });
+        const range = c.headers.get("content-range");
+        totalRuns = range ? range.split("/")[1] : null;
+      } catch (e) { totalRuns = null; }
+      metaEl.textContent = `${data.length} ${data.length === 1 ? "player" : "players"}`
+        + (totalRuns ? `, ${totalRuns} saved runs` : "")
+        + `. Updated ${new Date().toLocaleTimeString([], { hour:"numeric", minute:"2-digit", second:"2-digit" })}, refreshes every 30 seconds.`;
+      render();
+    } catch (e) {
+      statusEl.textContent = "Couldn’t load scores. Check your connection, or whether the Supabase project is paused.";
+    }
+  }
+
+  document.getElementById("refresh").addEventListener("click", load);
+  q.addEventListener("input", render);
+  load();
+  setInterval(load, 30000);
+})();
+</script>
+</body>
+</html>
